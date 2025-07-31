@@ -8,64 +8,88 @@ import (
 	"github.com/krmmzs/subtitle-matcher/subtitlematcher"
 )
 
-func main() {
-	var directory string
-	var executeMode bool
+// Config holds the command line configuration
+type Config struct {
+	Directory   string
+	ExecuteMode bool
+}
 
-	// Parse command line arguments
+// parseArgs parses command line arguments and returns configuration
+func parseArgs() Config {
+	var config Config
+
 	if len(os.Args) < 2 {
-		directory = "."
+		config.Directory = "."
 	} else {
-		directory = os.Args[1]
+		config.Directory = os.Args[1]
 	}
 
-	executeMode = false
+	config.ExecuteMode = false
 	for _, arg := range os.Args {
 		if arg == "-execute" || arg == "--execute" {
-			executeMode = true
+			config.ExecuteMode = true
 			break
 		}
 	}
 
-	// Check if directory exists
+	return config
+}
+
+// validateDirectory checks if the directory exists
+func validateDirectory(directory string) error {
 	if _, err := os.Stat(directory); os.IsNotExist(err) {
-		fmt.Printf("Directory does not exist: %s\n", directory)
-		os.Exit(1)
+		return fmt.Errorf("directory does not exist: %s", directory)
 	}
+	return nil
+}
 
-	// Example 1: Basic usage (dry run by default)
+// runBasicExample demonstrates basic usage with default settings
+func runBasicExample(directory string) error {
 	fmt.Println("=== Example 1: Basic usage (dry run) ===")
-	matcher1 := subtitlematcher.New(directory)
-	results1, err := matcher1.Match()
+	matcher := subtitlematcher.New(directory)
+	results, err := matcher.Match()
 	if err != nil {
-		fmt.Printf("Error in Example 1: %v\n", err)
-	} else {
-		fmt.Printf("Processed %d subtitle files\n", len(results1))
+		return fmt.Errorf("error in basic example: %w", err)
 	}
 
-	// Example 2: High similarity threshold with execute option
+	fmt.Printf("Processed %d subtitle files\n", len(results))
+	return nil
+}
+
+// runHighThresholdExample demonstrates usage with high similarity threshold
+func runHighThresholdExample(directory string, executeMode bool) error {
 	fmt.Println("\n=== Example 2: Execute with high similarity threshold ===")
-	matcher2 := subtitlematcher.New(directory,
+	matcher := subtitlematcher.New(directory,
 		subtitlematcher.DryRun(!executeMode),
 		subtitlematcher.SimilarityThreshold(0.8),
 		subtitlematcher.Verbose(true),
 	)
-	results2, err := matcher2.Match()
+
+	results, err := matcher.Match()
 	if err != nil {
-		fmt.Printf("Error in Example 2: %v\n", err)
-	} else {
-		successCount := 0
-		for _, result := range results2 {
-			if result.Renamed && result.Error == nil {
-				successCount++
-			}
-		}
-		fmt.Printf("Successfully processed %d subtitle files\n", successCount)
+		return fmt.Errorf("error in high threshold example: %w", err)
 	}
 
-	// Example 3: Custom configuration with detailed results
+	successCount := countSuccessfulRenames(results)
+	fmt.Printf("Successfully processed %d subtitle files\n", successCount)
+	return nil
+}
+
+// countSuccessfulRenames counts how many files were successfully renamed
+func countSuccessfulRenames(results []subtitlematcher.MatchResult) int {
+	count := 0
+	for _, result := range results {
+		if result.Renamed && result.Error == nil {
+			count++
+		}
+	}
+	return count
+}
+
+// runCustomConfigExample demonstrates custom configuration
+func runCustomConfigExample(directory string, executeMode bool) error {
 	fmt.Println("\n=== Example 3: Custom configuration ===")
-	matcher3 := subtitlematcher.New(directory,
+	matcher := subtitlematcher.New(directory,
 		subtitlematcher.VideoExtensions([]string{".mkv", ".mp4", ".webm"}),
 		subtitlematcher.SubtitleExtensions([]string{".srt"}),
 		subtitlematcher.SimilarityThreshold(0.7),
@@ -75,48 +99,107 @@ func main() {
 		subtitlematcher.IgnoreExisting(true),
 	)
 
-	results3, err := matcher3.Match()
+	results, err := matcher.Match()
 	if err != nil {
-		fmt.Printf("Error in Example 3: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error in custom config example: %w", err)
 	}
 
-	// Display detailed results for Example 3
-	if len(results3) > 0 {
-		fmt.Println("Detailed results:")
-		for _, result := range results3 {
-			if result.Similarity >= 0.7 {
-				status := "WOULD RENAME"
-				if !executeMode {
-					// In dry run mode
-				} else if result.Renamed && result.Error == nil {
-					status = "RENAMED"
-				} else if result.Error != nil {
-					status = fmt.Sprintf("ERROR: %v", result.Error)
-				}
-				
-				fmt.Printf("  %s (%.2f similarity) -> %s [%s]\n",
-					strings.TrimSuffix(result.SubtitlePath[strings.LastIndex(result.SubtitlePath, "/")+1:], ".srt"),
-					result.Similarity,
-					strings.TrimSuffix(result.NewSubtitlePath[strings.LastIndex(result.NewSubtitlePath, "/")+1:], ".srt"),
-					status)
-			}
+	displayDetailedResults(results, executeMode)
+	return nil
+}
+
+// displayDetailedResults shows detailed results for the custom config example
+func displayDetailedResults(results []subtitlematcher.MatchResult, executeMode bool) {
+	if len(results) == 0 {
+		return
+	}
+
+	fmt.Println("Detailed results:")
+	for _, result := range results {
+		if result.Similarity >= 0.7 {
+			status := determineStatus(result, executeMode)
+			subtitleName := extractFileName(result.SubtitlePath, ".srt")
+			newSubtitleName := extractFileName(result.NewSubtitlePath, ".srt")
+
+			fmt.Printf("  %s (%.2f similarity) -> %s [%s]\n",
+				subtitleName, result.Similarity, newSubtitleName, status)
 		}
 	}
+}
 
-	// Summary
+// determineStatus determines the status string for a match result
+func determineStatus(result subtitlematcher.MatchResult, executeMode bool) string {
+	if !executeMode {
+		return "WOULD RENAME"
+	}
+	if result.Renamed && result.Error == nil {
+		return "RENAMED"
+	}
+	if result.Error != nil {
+		return fmt.Sprintf("ERROR: %v", result.Error)
+	}
+	return "NO CHANGE"
+}
+
+// extractFileName extracts the filename without path and extension
+func extractFileName(fullPath, extension string) string {
+	lastIndex := strings.LastIndex(fullPath, "/")
+	if lastIndex == -1 {
+		lastIndex = 0
+	} else {
+		lastIndex++
+	}
+	return strings.TrimSuffix(fullPath[lastIndex:], extension)
+}
+
+// printUsageInformation displays usage information to the user
+func printUsageInformation(executeMode bool) {
 	if !executeMode {
 		fmt.Println("\n" + strings.Repeat("=", 60))
 		fmt.Println("All examples ran in dry-run mode.")
 		fmt.Println("Add -execute flag to perform actual renaming.")
-		fmt.Println("\nUsage:")
-		fmt.Println("  go run main.go [directory] [-execute]")
-		fmt.Println("\nExamples:")
-		fmt.Println("  go run main.go                    # Dry run in current directory")
-		fmt.Println("  go run main.go /path/to/videos    # Dry run in specified directory")
-		fmt.Println("  go run main.go . -execute         # Execute renaming in current directory")
+		printUsageExamples()
 	} else {
 		fmt.Println("\n" + strings.Repeat("=", 60))
 		fmt.Println("File renaming operations completed.")
 	}
+}
+
+// printUsageExamples prints command line usage examples
+func printUsageExamples() {
+	fmt.Println("\nUsage:")
+	fmt.Println("  go run main.go [directory] [-execute]")
+	fmt.Println("\nExamples:")
+	fmt.Println("  go run main.go                    # Dry run in current directory")
+	fmt.Println("  go run main.go /path/to/videos    # Dry run in specified directory")
+	fmt.Println("  go run main.go . -execute         # Execute renaming in current directory")
+}
+
+func main() {
+	config := parseArgs()
+
+	// Validate directory exists
+	if err := validateDirectory(config.Directory); err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Run examples
+	if err := runBasicExample(config.Directory); err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := runHighThresholdExample(config.Directory, config.ExecuteMode); err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := runCustomConfigExample(config.Directory, config.ExecuteMode); err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Print usage information
+	printUsageInformation(config.ExecuteMode)
 }

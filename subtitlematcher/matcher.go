@@ -311,84 +311,139 @@ func (vsm *VideoSubtitleMatcher) Match() ([]MatchResult, error) {
 		return nil, fmt.Errorf("failed to scan files: %w", err)
 	}
 
-	if vsm.verbose {
-		fmt.Printf("Found %d video files and %d subtitle files\n", len(videoFiles), len(subtitleFiles))
-	}
+	vsm.logFileCount(len(videoFiles), len(subtitleFiles))
 
 	var results []MatchResult
-
 	for _, subtitlePath := range subtitleFiles {
-		bestMatch, score := vsm.findBestMatch(subtitlePath, videoFiles)
-
-		result := MatchResult{
-			SubtitlePath: subtitlePath,
-			VideoPath:    bestMatch,
-			Similarity:   score,
-		}
-
-		if score >= vsm.similarityThreshold {
-			videoBaseName := strings.TrimSuffix(filepath.Base(bestMatch), filepath.Ext(bestMatch))
-			subtitleExt := filepath.Ext(subtitlePath)
-			newSubtitlePath := filepath.Join(filepath.Dir(subtitlePath), videoBaseName+subtitleExt)
-			result.NewSubtitlePath = newSubtitlePath
-
-			// Skip if already correctly named and ignoreExisting is true
-			if vsm.ignoreExisting && subtitlePath == newSubtitlePath {
-				continue
-			}
-
-			if vsm.verbose {
-				fmt.Printf("\nMatch found (%.2f similarity):\n", score)
-				fmt.Printf("  Subtitle: %s\n", filepath.Base(subtitlePath))
-				fmt.Printf("  Video:    %s\n", filepath.Base(bestMatch))
-				fmt.Printf("  New name: %s\n", filepath.Base(newSubtitlePath))
-			}
-
-			if !vsm.dryRun {
-				if subtitlePath != newSubtitlePath {
-					err := os.Rename(subtitlePath, newSubtitlePath)
-					if err != nil {
-						result.Error = err
-						if vsm.verbose {
-							fmt.Printf("  Error renaming: %v\n", err)
-						}
-					} else {
-						result.Renamed = true
-						if vsm.verbose {
-							fmt.Printf("  ✓ Renamed successfully\n")
-						}
-					}
-				} else {
-					result.Renamed = true
-					if vsm.verbose {
-						fmt.Printf("  ✓ Already correctly named\n")
-					}
-				}
-			}
-		} else {
-			if vsm.verbose {
-				fmt.Printf("\nNo good match found for: %s (best score: %.2f)\n", filepath.Base(subtitlePath), score)
-			}
-		}
-
-		results = append(results, result)
-	}
-
-	if vsm.verbose {
-		matchCount := 0
-		for _, result := range results {
-			if result.Similarity >= vsm.similarityThreshold {
-				matchCount++
-			}
-		}
-
-		if vsm.dryRun {
-			fmt.Printf("\nDry run completed. %d subtitles would be renamed.\n", matchCount)
-			fmt.Println("Use DryRun(false) option to perform actual renaming.")
-		} else {
-			fmt.Printf("\nRenaming completed. %d subtitles processed.\n", matchCount)
+		result := vsm.processSubtitleFile(subtitlePath, videoFiles)
+		if vsm.shouldIncludeResult(result) {
+			results = append(results, result)
 		}
 	}
 
+	vsm.logSummary(results)
 	return results, nil
+}
+
+// logFileCount logs the number of video and subtitle files found
+func (vsm *VideoSubtitleMatcher) logFileCount(videoCount, subtitleCount int) {
+	if vsm.verbose {
+		fmt.Printf("Found %d video files and %d subtitle files\n", videoCount, subtitleCount)
+	}
+}
+
+// shouldIncludeResult determines if a result should be included in the final results
+func (vsm *VideoSubtitleMatcher) shouldIncludeResult(result MatchResult) bool {
+	// Skip if already correctly named and ignoreExisting is true
+	if vsm.ignoreExisting && result.SubtitlePath == result.NewSubtitlePath {
+		return false
+	}
+	return true
+}
+
+// processSubtitleFile processes a single subtitle file and returns the match result
+func (vsm *VideoSubtitleMatcher) processSubtitleFile(subtitlePath string, videoFiles []string) MatchResult {
+	bestMatch, score := vsm.findBestMatch(subtitlePath, videoFiles)
+
+	result := MatchResult{
+		SubtitlePath: subtitlePath,
+		VideoPath:    bestMatch,
+		Similarity:   score,
+	}
+
+	if score >= vsm.similarityThreshold {
+		result = vsm.processMatchedSubtitle(result, bestMatch)
+	} else {
+		vsm.logNoMatch(subtitlePath, score)
+	}
+
+	return result
+}
+
+// processMatchedSubtitle handles a subtitle that has a good match
+func (vsm *VideoSubtitleMatcher) processMatchedSubtitle(result MatchResult, bestMatch string) MatchResult {
+	videoBaseName := strings.TrimSuffix(filepath.Base(bestMatch), filepath.Ext(bestMatch))
+	subtitleExt := filepath.Ext(result.SubtitlePath)
+	newSubtitlePath := filepath.Join(filepath.Dir(result.SubtitlePath), videoBaseName+subtitleExt)
+	result.NewSubtitlePath = newSubtitlePath
+
+	vsm.logMatch(result)
+
+	if !vsm.dryRun {
+		result = vsm.performRename(result)
+	}
+
+	return result
+}
+
+// logMatch logs information about a successful match
+func (vsm *VideoSubtitleMatcher) logMatch(result MatchResult) {
+	if !vsm.verbose {
+		return
+	}
+
+	fmt.Printf("\nMatch found (%.2f similarity):\n", result.Similarity)
+	fmt.Printf("  Subtitle: %s\n", filepath.Base(result.SubtitlePath))
+	fmt.Printf("  Video:    %s\n", filepath.Base(result.VideoPath))
+	fmt.Printf("  New name: %s\n", filepath.Base(result.NewSubtitlePath))
+}
+
+// logNoMatch logs information about a subtitle with no good match
+func (vsm *VideoSubtitleMatcher) logNoMatch(subtitlePath string, score float64) {
+	if vsm.verbose {
+		fmt.Printf("\nNo good match found for: %s (best score: %.2f)\n", filepath.Base(subtitlePath), score)
+	}
+}
+
+// performRename performs the actual file renaming operation
+func (vsm *VideoSubtitleMatcher) performRename(result MatchResult) MatchResult {
+	if result.SubtitlePath == result.NewSubtitlePath {
+		result.Renamed = true
+		if vsm.verbose {
+			fmt.Printf("  ✓ Already correctly named\n")
+		}
+		return result
+	}
+
+	err := os.Rename(result.SubtitlePath, result.NewSubtitlePath)
+	if err != nil {
+		result.Error = err
+		if vsm.verbose {
+			fmt.Printf("  Error renaming: %v\n", err)
+		}
+	} else {
+		result.Renamed = true
+		if vsm.verbose {
+			fmt.Printf("  ✓ Renamed successfully\n")
+		}
+	}
+
+	return result
+}
+
+// logSummary logs the final summary of the matching operation
+func (vsm *VideoSubtitleMatcher) logSummary(results []MatchResult) {
+	if !vsm.verbose {
+		return
+	}
+
+	matchCount := vsm.countMatches(results)
+
+	if vsm.dryRun {
+		fmt.Printf("\nDry run completed. %d subtitles would be renamed.\n", matchCount)
+		fmt.Println("Use DryRun(false) option to perform actual renaming.")
+	} else {
+		fmt.Printf("\nRenaming completed. %d subtitles processed.\n", matchCount)
+	}
+}
+
+// countMatches counts the number of subtitles that met the similarity threshold
+func (vsm *VideoSubtitleMatcher) countMatches(results []MatchResult) int {
+	count := 0
+	for _, result := range results {
+		if result.Similarity >= vsm.similarityThreshold {
+			count++
+		}
+	}
+	return count
 }
