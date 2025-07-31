@@ -18,14 +18,14 @@ import (
 // It supports various video and subtitle formats and uses configurable similarity
 // algorithms to ensure accurate matching.
 type VideoSubtitleMatcher struct {
-	videoExtensions     []string  // Supported video file extensions
-	subtitleExtensions  []string  // Supported subtitle file extensions
-	directory           string    // Working directory
-	similarityThreshold float64   // Minimum similarity score for matching (0.0-1.0)
-	recursive           bool      // Whether to scan directories recursively
-	dryRun              bool      // Whether to perform actual file operations
-	verbose             bool      // Whether to output detailed information
-	ignoreExisting      bool      // Whether to skip files that are already correctly named
+	videoExtensions     []string // Supported video file extensions
+	subtitleExtensions  []string // Supported subtitle file extensions
+	directory           string   // Working directory
+	similarityThreshold float64  // Minimum similarity score for matching (0.0-1.0)
+	recursive           bool     // Whether to scan directories recursively
+	dryRun              bool     // Whether to perform actual file operations
+	verbose             bool     // Whether to output detailed information
+	ignoreExisting      bool     // Whether to skip files that are already correctly named
 }
 
 // Option defines a functional option for configuring VideoSubtitleMatcher.
@@ -98,10 +98,11 @@ func IgnoreExisting(ignore bool) Option {
 // Additional options can be provided to customize the matching behavior.
 //
 // Example:
-//   matcher := subtitlematcher.New("/path/to/videos",
-//       subtitlematcher.SimilarityThreshold(0.8),
-//       subtitlematcher.DryRun(false),
-//   )
+//
+//	matcher := subtitlematcher.New("/path/to/videos",
+//	    subtitlematcher.SimilarityThreshold(0.8),
+//	    subtitlematcher.DryRun(false),
+//	)
 func New(directory string, options ...Option) *VideoSubtitleMatcher {
 	// Initialize with sensible defaults
 	vsm := &VideoSubtitleMatcher{
